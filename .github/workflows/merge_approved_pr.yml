@@ -20,19 +20,22 @@ jobs:
           sudo apt update
           sudo apt install -y gh jq
 
+      - name: Authenticate GH CLI
+        run: gh auth setup-git
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Fetch all open PRs
         id: list-prs
         run: |
-          prs=$(gh pr list --state open --json number --jq '.[] | .number')
-          echo "prs<<EOF" >> $GITHUB_OUTPUT
-          echo "$prs" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          prs=$(gh pr list --state open --json number | jq -r '.[].number')
+          echo "PRS=$(echo "$prs" | tr '\n' ' ')" >> $GITHUB_ENV
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Process PRs
         run: |
-          for pr in ${{ steps.list-prs.outputs.prs }}; do
+          for pr in $PRS; do
             echo "🔍 Checking PR #$pr..."
 
             base_branch=$(gh pr view $pr --json baseRefName --jq '.baseRefName')
@@ -80,19 +83,24 @@ jobs:
               continue
             fi
 
-            echo "✅ PR #$pr meets all criteria. Attempting update..."
+            if [[ "$mergeable" != "MERGEABLE" ]]; then
+              echo "❌ Merge conflict detected. Skipping PR #$pr"
+              continue
+            fi
+
+            echo "✅ PR #$pr is eligible. Updating with $VERSION_BRANCH..."
 
             gh pr checkout $pr
             git fetch origin $VERSION_BRANCH
 
             if ! git merge origin/$VERSION_BRANCH --no-edit; then
-              echo "❌ Merge conflict detected. Skipping PR #$pr"
+              echo "❌ Merge conflict when updating PR #$pr. Skipping."
               continue
             fi
 
             git push origin HEAD
 
-            echo "🔀 Attempting to merge PR #$pr..."
+            echo "🔀 Merging PR #$pr..."
             gh pr merge $pr --merge --delete-branch
           done
         env:
