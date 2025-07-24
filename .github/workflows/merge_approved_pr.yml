@@ -6,9 +6,9 @@ on:
   workflow_dispatch:
 
 env:
-  VERSION_LABEL: v1.6.0
-  VERSION_BRANCH: cm-reports-v160
-  REQUIRED_LABEL: ready-to-merge
+  VERSION_LABEL: v1.0.0
+  VERSION_BRANCH: developer
+  REQUIRED_LABEL: approved
 
 jobs:
   auto-merge-prs:
@@ -25,7 +25,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Checkout repository (required for git merge)
+      - name: Checkout repository (required for git)
         uses: actions/checkout@v4
 
       - name: Fetch all open PRs
@@ -44,14 +44,12 @@ jobs:
             base_branch=$(gh pr view $pr --json baseRefName --jq '.baseRefName')
             labels=$(gh pr view $pr --json labels --jq '.labels[].name')
             approved=$(gh pr view $pr --json reviewDecision --jq '.reviewDecision')
-            resolved=$(gh pr view $pr --json reviewThreads --jq '[.reviewThreads[] | select(.isResolved == false)] | length == 0')
             mergeable=$(gh pr view $pr --json mergeable --jq '.mergeable')
             checks_passed=$(gh pr checks $pr --exit-status >/dev/null 2>&1 && echo true || echo false)
 
             echo "Base: $base_branch"
             echo "Labels: $labels"
             echo "Approved: $approved"
-            echo "Resolved: $resolved"
             echo "Mergeable: $mergeable"
             echo "Checks Passed: $checks_passed"
 
@@ -75,8 +73,26 @@ jobs:
               continue
             fi
 
-            if [[ "$resolved" != "true" ]]; then
-              echo "⏩ Skipping: unresolved review threads"
+            echo "🔍 Checking if all conversations are resolved..."
+
+            owner=$(echo "${{ github.repository }}" | cut -d/ -f1)
+            repo=$(echo "${{ github.repository }}" | cut -d/ -f2)
+
+            unresolved=$(gh api graphql -f query="
+              query {
+                repository(owner: \"$owner\", name: \"$repo\") {
+                  pullRequest(number: $pr) {
+                    reviewThreads(first: 100) {
+                      nodes {
+                        isResolved
+                      }
+                    }
+                  }
+                }
+              }" --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)' | wc -l)
+
+            if [[ "$unresolved" -ne 0 ]]; then
+              echo "⏩ Skipping: $unresolved unresolved conversation(s)"
               continue
             fi
 
