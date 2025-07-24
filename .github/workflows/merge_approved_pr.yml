@@ -1,18 +1,17 @@
-name: Verify PRs for Auto Merge – Dry Run
+name: Auto Merge Verified PRs
 
 on:
   schedule:
-    - cron: '*/1 * * * *'  # every 10 minutes
+    - cron: '*/1 * * * *'  # Every 1 minute
   workflow_dispatch:
 
 env:
   VERSION_LABEL: v1.0.0
   VERSION_BRANCH: developer
-  REQUIRED_LABEL: ready-to-merge
-  VERIFIED_LABEL: verified
+  REQUIRED_LABEL: approved
 
 jobs:
-  verify-prs:
+  auto-merge-prs:
     runs-on: ubuntu-latest
 
     steps:
@@ -31,7 +30,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Process eligible PRs
+      - name: Process PRs
         run: |
           for pr in ${{ steps.list-prs.outputs.prs }}; do
             echo "🔍 Checking PR #$pr..."
@@ -43,10 +42,14 @@ jobs:
             mergeable=$(gh pr view $pr --json mergeable --jq '.mergeable')
             checks_passed=$(gh pr checks $pr --exit-status >/dev/null 2>&1 && echo true || echo false)
 
-            echo "Base: $base_branch | Labels: $labels"
-            echo "Approved: $approved | Resolved: $resolved | Mergeable: $mergeable | CI passed: $checks_passed"
+            echo "Base: $base_branch"
+            echo "Labels: $labels"
+            echo "Approved: $approved"
+            echo "Resolved: $resolved"
+            echo "Mergeable: $mergeable"
+            echo "Checks Passed: $checks_passed"
 
-            # Conditions
+            # Filter logic
             if [[ "$base_branch" != "$VERSION_BRANCH" ]]; then
               echo "⏩ Skipping: wrong base branch"
               continue
@@ -77,14 +80,20 @@ jobs:
               continue
             fi
 
-            if [[ "$mergeable" != "MERGEABLE" ]]; then
-              echo "⏩ Skipping: not mergeable (may have conflicts)"
+            echo "✅ PR #$pr meets all criteria. Attempting update..."
+
+            gh pr checkout $pr
+            git fetch origin $VERSION_BRANCH
+
+            if ! git merge origin/$VERSION_BRANCH --no-edit; then
+              echo "❌ Merge conflict detected. Skipping PR #$pr"
               continue
             fi
 
-            echo "✅ PR #$pr meets all merge criteria – tagging with '${VERIFIED_LABEL}'"
+            git push origin HEAD
 
-            gh issue edit $pr --add-label "${VERIFIED_LABEL}"
+            echo "🔀 Attempting to merge PR #$pr..."
+            gh pr merge $pr --merge --delete-branch
           done
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
