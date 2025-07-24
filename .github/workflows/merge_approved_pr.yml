@@ -6,24 +6,27 @@ on:
   workflow_dispatch:
 
 env:
-  VERSION_LABEL: v1.0.0
-  VERSION_BRANCH: developer
-  REQUIRED_LABEL: approved
+  VERSION_LABEL: v1.6.0
+  VERSION_BRANCH: cm-reports-v160
+  REQUIRED_LABEL: ready-to-merge
 
 jobs:
   auto-merge-prs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Install GitHub CLI
+      - name: Install GitHub CLI & dependencies
         run: |
           sudo apt update
           sudo apt install -y gh jq
 
-      - name: Authenticate GH CLI
+      - name: Authenticate GitHub CLI
         run: gh auth setup-git
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout repository (required for git merge)
+        uses: actions/checkout@v4
 
       - name: Fetch all open PRs
         id: list-prs
@@ -33,7 +36,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Process PRs
+      - name: Process eligible PRs
         run: |
           for pr in $PRS; do
             echo "🔍 Checking PR #$pr..."
@@ -52,7 +55,6 @@ jobs:
             echo "Mergeable: $mergeable"
             echo "Checks Passed: $checks_passed"
 
-            # Filter logic
             if [[ "$base_branch" != "$VERSION_BRANCH" ]]; then
               echo "⏩ Skipping: wrong base branch"
               continue
@@ -74,7 +76,7 @@ jobs:
             fi
 
             if [[ "$resolved" != "true" ]]; then
-              echo "⏩ Skipping: unresolved threads"
+              echo "⏩ Skipping: unresolved review threads"
               continue
             fi
 
@@ -88,7 +90,7 @@ jobs:
               continue
             fi
 
-            echo "✅ PR #$pr is eligible. Updating with $VERSION_BRANCH..."
+            echo "✅ PR #$pr is eligible. Updating branch with latest $VERSION_BRANCH..."
 
             gh pr checkout $pr
             git fetch origin $VERSION_BRANCH
@@ -100,7 +102,7 @@ jobs:
 
             git push origin HEAD
 
-            echo "🔀 Merging PR #$pr..."
+            echo "🔀 Merging PR #$pr into $VERSION_BRANCH..."
             gh pr merge $pr --merge --delete-branch
           done
         env:
